@@ -67,3 +67,29 @@
 #####  Clock Configuration
 * **HCLK (MHz)**: **180**
     * F446RE의 최대 동작 클럭으로 설정하여 연산 및 처리 속도 최적화
+
+
+## 2일차
+
+- 라즈베리파이5 STM32 F446RE MG90S 2개
+
+### STM32CubeMX 추가 설정
+- TIMER 설정 (PWM 출력용)
+    - 왼쪽 메뉴 Timers ➡️ TIM2 클릭
+    
+    - Clock Source: Internal Clock 선택
+
+    - Channel 1: PWM Generation CH1 선택 (선택 시 PA0 핀이 파란색으로 활성화됩니다.)
+
+    - Parameter Settings (하단 탭):
+
+    - Prescaler (PSC): 1799
+
+    - Counter Period (ARR): 999
+
+코드 생성:
+
+우측 상단 GENERATE CODE 버튼을 눌러 CubeIDE 프로젝트로 설정을 반영합니다.
+
+### 수동 서보 모터 돌리기
+- 디버깅 실패
