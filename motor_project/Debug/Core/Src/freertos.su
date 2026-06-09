@@ -1,0 +1,4 @@
+../Core/Src/freertos.c:107:6:MX_FREERTOS_Init	8	static
+../Core/Src/freertos.c:141:6:StartDefaultTask	136	static
+../Core/Src/freertos.c:318:6:StartTask02	32	static
+../Core/Src/freertos.c:359:6:HAL_UART_RxCpltCallback	16	static
