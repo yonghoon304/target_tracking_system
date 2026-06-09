@@ -149,12 +149,12 @@ void StartDefaultTask(void *argument)
   const uint16_t step_size = 16;
 
   // ── 제어 상수 ────────────────────────────────────────────
-  const float Kp_x      = 0.08f;
-  const float Kp_y      = 0.08f;
+  const float Kp_x      = 0.1f;
+  const float Kp_y      = 0.1f;
   const float Kd_x      = 0.25f;   // D항: 브레이크 강도
   const float Kd_y      = 0.25f;   // 진동 있으면 올리고, 굳으면 낮추기
   const int   max_speed = 15;
-  const int   deadzone  = 10;      // 서보 버징 방지
+  const int   deadzone  = 20;      // 서보 버징 방지
   const float max_pulse = 2300.0f;
   const float min_pulse =  700.0f;
   // ─────────────────────────────────────────────────────────
