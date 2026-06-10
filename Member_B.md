@@ -134,3 +134,84 @@ if(ex > -(float)deadzone && ex < (float)deadzone) ex = 0.0f; // 데드존
         - 목표치를 향해 속도가 너무 가파르게 올라가면,변화 속도에 제동을 거는 브레이크 역할을 함. 오버슈트를 감소시킴, 잔차에 변화가 없음
     - 현재 이 프로젝트는 PD제어로만으로 충분해서 I제어는 하지않음 
 
+## CAN통신
+
+### CAN필터 설정 구조
+```c
+CAN_FilterTypeDef canFilterConfig;
+
+canFilterConfig.FilterBank = 0;
+canFilterConfig.FilterMode = CAN_FILTERMODE_IDMASK;
+canFilterConfig.FilterScale = CAN_FILTERSCALE_32BIT;
+canFilterConfig.FilterIdHigh = 0x0000;
+canFilterConfig.FilterIdLow = 0x0000;
+canFilterConfig.FilterMaskIdHigh = 0x0000;
+canFilterConfig.FilterMaskIdLow = 0x0000;
+canFilterConfig.FilterFIFOAssignment = CAN_RX_FIFO0;
+canFilterConfig.FilterActivation = ENABLE;
+canFilterConfig.SlaveStartFilterBank = 14;
+
+HAL_CAN_ConfigFilter(&hcan1, &canFilterConfig);
+```
+-  FilterBank
+    - STM32시리즈 기준 필터뱅크를 0~27을 가지는데 can1이 0~13번을 쓰고 can2가 14~27번을 쓴다. 현재 can1을 사용 중이므로 0번 뱅크 할당
+
+- FilterMode - ID List모드,Mask모드
+    - ID List모드 - 화이트리스트방식, 내가 지정한ID(0x101,0x102...)만 정확히 일치할 때만 통과시키겠다.
+    - ID Mask모드 - 비트 마스크 방식, 특정 비트 열이 일치하는지 검사하겠다.
+    - 현재 설정은 lsit,mask 모두 0x0000 => &연산 결과가 항상 0이므로 수신된 ID가 무엇인든 무조건 통과(CAN은 1대다 통신이 가능하지만 지금같은 경우는 1대1이기에 문제 없음)
+- FilterScale 및 FIFO할당
+    - canFilterConfig.FilterScale = CAN_FILTERSCALE_32BIT;는 필터 레지스터 32비트 크기로 통째로 쓴다.
+    - canFilterConfig.FilterFIFOAssignment = CAN_RX_FIFO0; 필터를 통과한 메시지는 FIFO0번방에 차곡차곡 쌓이게 된다.
+
+### 인터럽트 활성화 및 CAN 시작
+```c
+HAL_CAN_Start(&hcan1);
+HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
+```
+- CAN컨트롤러를 하드웨어적으로 활성화한 뒤 수신 전용 인터럽트를 킨다.
+    - CAN으로 수신된 메시지가 있으면(대기상태,Pending) 하드웨어 인트럽트 발생시킨다.
+
+- 수신 인터럽트 콜백 및 데이터 파싱
+```c
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
+{
+    CAN_RxHeaderTypeDef RxHeader;
+    uint8_t RxData[8];
+    TurretMsg_t rx_msg;
+
+    if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &RxHeader, RxData) == HAL_OK) {
+        rx_msg.msg_type   = RxData[0];
+        rx_msg.manual_cmd = (uint16_t)((RxData[2] << 8) | RxData[1]);
+        rx_msg.error_x    = (int16_t)((RxData[4] << 8) | RxData[3]);
+        rx_msg.error_y    = (int16_t)((RxData[6] << 8) | RxData[5]);
+
+        if (KeyQueueHandle != NULL) {
+            osMessageQueuePut(KeyQueueHandle, &rx_msg, 0, 0);
+        }
+    }
+}
+```
+- 비트 연상을 통한 데이터 조립(리틀 엔디안 대응)
+    - CAN은 바이트단위배열로 데이터를 전송, 하지만 라즈베리파이는 16비트(2바이트)크기이므로 그걸 역순으로 결합하는 단계가 필요함
+    - ex) CAN으로 500이라는 10진수를 받으면 16진수로는(0x01F4)지만 이걸 끊어서 [3]0xF4,[4]0x01로 처리함. 리틀 엔디안이라 낮은 자리수부터 전달
+    - 따라서 이걸 다시 결합하려면 비트 연산자로 [4] <<8 을 통해 0x0100으로 만들어주고 두개를 결합해야 0x01F4가 됨. 그 과정의 코드.
+
+### 하드웨어 및 프로토콜 관점에서의 CAN 특성 심도 분석
+
+- CAN 통신이 노이즈에 강한 근본적인 이유는 전압의 절대적인 기준값을 쓰지않고 두 선의 상대적인 전압 차이를 데이터로 해석하는 **차동 신호**방식을 쓰기 때문
+- 트랜시버는 Recessive와 Dominant 2개의 상태를 가짐
+    - Recessive : 두 선의 전압이 모두  2.5V주변에 머물며 차이가 없다
+    - Dominant : CAN_H는 밀어올리고(3.5V) CAN_L는 잡아 내려서 (1.5V)로 확실한 전압 차 2.0V를 만듬
+    - 이때 핵심은 노이즈가 발생하면 둘 다 똑같이 내리거나 오르기에 전압차이에 대해 지장을 안줌
+    - 각 메시지에는 우선순위가 있음
+    - CSMA/CA Arbitration
+        - 여러 노드가 동시에 전송 시작해도 데이터 손실 없음
+        - Dominant(0) vs Recessive(1): 0이 1을 이김
+        - 낮은 ID(높은 우선순위)가 버스를 차지, 높은 ID는 자동으로 대기
+        - 유실된 메시지는 자동 재전송
+
+- 임베디드 통신 프로토콜 정리
+    - [주소](/https://doyun98.tistory.com/127)
+    - ![alt text](image-2.png)
+    - ![alt text](image-3.png)
